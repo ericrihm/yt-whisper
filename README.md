@@ -4,20 +4,40 @@ Transcribe YouTube videos by downloading audio via yt-dlp and transcribing with 
 
 ## Prerequisites
 
-- **Python 3.10+**
+- **Python 3.10+** (system install from python.org -- NOT Microsoft Store Python)
 - **ffmpeg** installed and on PATH
 - **NVIDIA GPU** with CUDA drivers (CPU fallback available but significantly slower)
+
+> **Windows note:** Microsoft Store Python's sandbox blocks native DLLs required by faster-whisper. Use system Python from [python.org](https://www.python.org/downloads/) instead.
 
 ## Install
 
 ```bash
+# Create a virtual environment with system Python
+python -m venv .venv
+
+# Activate it
+# Windows:
+.venv\Scripts\activate
+# Linux/Mac:
+source .venv/bin/activate
+
+# Install dependencies
 pip install -r requirements.txt
 ```
+
+### ffmpeg
+
+ffmpeg must be installed separately and available on PATH.
+
+- **Windows:** `winget install ffmpeg`
+- **Mac:** `brew install ffmpeg`
+- **Linux:** `sudo apt install ffmpeg`
 
 ## Usage
 
 ```bash
-# Basic — grabs YouTube subs if available, else transcribes
+# Basic -- grabs YouTube subs if available, else transcribes
 python -m yt_whisper https://www.youtube.com/watch?v=VIDEO_ID
 
 # Force Whisper transcription (skip subtitle check)
@@ -44,10 +64,10 @@ python -m yt_whisper https://www.youtube.com/watch?v=VIDEO_ID --force-whisper --
 | `--prompt` | `general` | Prompt profile or custom string |
 | `--force-whisper` | off | Always use Whisper, skip subtitle check |
 | `--output-dir` | `./transcripts` | Output directory |
-| `--model` | `large-v3` | Whisper model size |
+| `--model` | `large-v3` | Whisper model size (tiny, base, small, medium, large-v2, large-v3) |
 | `--format` | `both` | Output: `md`, `json`, or `both` |
 | `--language` | `en` | Language code |
-| `--verbose` | off | Show detailed progress |
+| `--verbose` | off | Show detailed progress and segment timing |
 
 ## Prompt Profiles
 
@@ -57,30 +77,48 @@ python -m yt_whisper https://www.youtube.com/watch?v=VIDEO_ID --force-whisper --
 | `grc` | GRC, compliance, NIST, FedRAMP, risk management |
 | `infosec` | Vulnerability, SOC, MITRE ATT&CK, incident response |
 
+Any value not matching a profile name is used as a custom prompt string.
+
 ## Performance
 
-| Video Length | Time (RTX 3080 Ti) | Expected Words |
-|-------------|---------------------|----------------|
-| 15 min | ~30s | ~2,300 |
-| 30 min | ~60s | ~4,500 |
-| 60 min | ~2 min | ~9,000 |
+| Video Length | Time (RTX 3080 Ti, CUDA) | Time (CPU fallback) | Expected Words |
+|-------------|--------------------------|---------------------|----------------|
+| 15 min | ~30s | ~5 min | ~2,300 |
+| 30 min | ~60s | ~10 min | ~4,500 |
+| 60 min | ~2 min | ~20 min | ~9,000 |
 
-First run downloads the model (~3GB for large-v3). Subsequent runs use the cached model.
+First run downloads the model (~3GB for large-v3, ~1GB for small/medium). Subsequent runs use the cached model.
+
+## Output
+
+Transcripts are saved to `./transcripts/` by default (configurable with `--output-dir`).
+
+**Markdown** (`{video_id}.md`) -- formatted with metadata header and paragraphed text.
+
+**JSON** (`{video_id}.json`) -- structured data with segments, timestamps, and full text.
 
 ## Troubleshooting
 
+### Python / DLL errors
+
+- **"Application Control policy has blocked this file"**: You're using Microsoft Store Python. Switch to system Python from python.org.
+- **"DLL load failed"**: Same issue -- use system Python, not MS Store Python.
+
 ### CUDA errors
 
-- **"Could not locate cudnn_ops64_9.dll"**: The CUDA DLL preloader should handle this automatically. If it persists, ensure `nvidia-cudnn-cu12` is installed: `pip install "nvidia-cudnn-cu12>=9.0,<10"`
-- **"CUDA unavailable" warning**: The tool falls back to CPU automatically. To fix: update NVIDIA drivers, ensure CUDA toolkit is installed, verify with `nvidia-smi`
-- **Slow transcription**: You're likely running on CPU. Check the CUDA warning above.
+- **"CUDA driver version is insufficient"**: Your NVIDIA driver is too old for the CUDA runtime. Update drivers from [nvidia.com/drivers](https://www.nvidia.com/drivers/).
+- **"Could not locate cudnn_ops64_9.dll"**: The CUDA DLL preloader should handle this. If it persists: `pip install "nvidia-cudnn-cu12>=9.0,<10"`
+- **"CUDA unavailable" warning**: The tool falls back to CPU automatically. To restore CUDA: update NVIDIA drivers, verify with `nvidia-smi`.
+- **Slow transcription**: You're likely on CPU. Check for the CUDA warning in output.
 
 ### yt-dlp errors
 
-- **"Video unavailable"**: Video may be private, age-restricted, or geo-blocked
-- **ffmpeg not found**: Install ffmpeg and ensure it's on your PATH
+- **"Video unavailable"**: Video may be private, age-restricted, or geo-blocked.
+- **"ffprobe and ffmpeg not found"**: Install ffmpeg and ensure it's on your PATH (see Install section).
+- **"No supported JavaScript runtime"**: yt-dlp warning -- does not affect functionality for most videos.
 
-### Word count warnings
+### Transcription issues
 
-- **"Low word count"**: Transcript may be incomplete. Try `--force-whisper` if using YouTube subs, or try a different `--model`
-- **"High word count"**: May indicate Whisper hallucination (repeated phrases). Check the output for repetition.
+- **"No speech detected"**: VAD filter found no speech. Common with music-only content. Try a different video or a larger model.
+- **"Low word count" warning**: Transcript may be incomplete. Try `--force-whisper` if using YouTube subs, or a larger `--model`.
+- **"High word count" warning**: May indicate Whisper hallucination (repeated phrases). Check output for repetition.
