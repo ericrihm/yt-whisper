@@ -120,7 +120,7 @@ def main():
         # Validate and get wpm
         wpm = validate_word_count(word_count, metadata["duration"])
 
-        print(f"\n\u2713 {metadata['title']}")
+        print(f"\n[OK] {metadata['title']}")
         print(f"  Duration:    {duration_formatted}")
         if wpm is not None:
             print(f"  Words:       {word_count} ({wpm:.0f} words/min)")
