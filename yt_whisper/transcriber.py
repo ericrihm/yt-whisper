@@ -5,10 +5,6 @@ import sys
 
 from yt_whisper import cuda_preload
 
-# faster_whisper is intentionally NOT imported here at module level.
-# It must be imported inside transcribe(), after cuda_preload.ensure_dlls().
-# This sentinel exists solely so patch("yt_whisper.transcriber.faster_whisper") works in tests.
-faster_whisper = None
 
 
 class TranscriptionError(Exception):

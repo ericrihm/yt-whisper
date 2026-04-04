@@ -7,7 +7,7 @@ import tempfile
 
 from yt_whisper.downloader import check_subtitles, download_audio, VideoUnavailableError
 from yt_whisper.formatter import format_output, format_duration
-from yt_whisper.prompts import resolve_prompt
+from yt_whisper.prompts import resolve_prompt, PROMPTS
 from yt_whisper.transcriber import transcribe, TranscriptionError
 
 MIN_VALIDATION_SECONDS = 30
@@ -103,7 +103,7 @@ def main():
         output_paths = format_output(
             text_or_segments, metadata, args.output_format, args.output_dir,
             model=args.model if method == "whisper" else None,
-            prompt_profile=args.prompt if method == "whisper" else None,
+            prompt_profile=(args.prompt if args.prompt in PROMPTS else "custom") if method == "whisper" else None,
             method=method,
             language=args.language,
         )

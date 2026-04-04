@@ -18,9 +18,9 @@ def test_transcription_error_is_exception():
 
 
 @patch("yt_whisper.transcriber.cuda_preload")
-@patch("yt_whisper.transcriber.faster_whisper")
-def test_transcribe_calls_cuda_preload(mock_fw, mock_preload):
+def test_transcribe_calls_cuda_preload(mock_preload):
     """Verify cuda_preload.ensure_dlls() is called before model creation."""
+    mock_fw = MagicMock()
     mock_model = MagicMock()
     mock_fw.WhisperModel.return_value = mock_model
     mock_model.transcribe.return_value = (
@@ -28,7 +28,7 @@ def test_transcribe_calls_cuda_preload(mock_fw, mock_preload):
         MagicMock(),
     )
 
-    # Patch the local import inside transcribe()
+    # Patch sys.modules to intercept the local 'from faster_whisper import WhisperModel'
     with patch.dict("sys.modules", {"faster_whisper": mock_fw}):
         from yt_whisper.transcriber import transcribe
         result = transcribe("test.wav", "tiny", None, "en", False)
