@@ -1,4 +1,8 @@
-from yt_whisper.formatter import format_duration, format_paragraphs
+import json
+import os
+import tempfile
+
+from yt_whisper.formatter import format_duration, format_output, format_paragraphs
 
 
 def test_duration_seconds_only():
@@ -42,3 +46,86 @@ def test_paragraphs_handles_question_marks():
     text = "What is this? It is a test. Does it work? Yes it does. Great!"
     result = format_paragraphs(text)
     assert "What is this?" in result
+
+
+def _sample_metadata():
+    return {
+        "video_id": "test123",
+        "title": "Test Video Title",
+        "channel": "Test Channel",
+        "upload_date": "20260101",
+        "duration": 600,
+        "url": "https://www.youtube.com/watch?v=test123",
+    }
+
+
+def _sample_segments():
+    return [
+        {"start": 0.0, "end": 3.0, "text": "Hello world."},
+        {"start": 3.0, "end": 6.0, "text": "This is a test."},
+    ]
+
+
+def test_format_output_md_creates_file():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        paths = format_output(
+            _sample_segments(), _sample_metadata(), "md", tmpdir,
+            model="large-v3", prompt_profile="grc", method="whisper", language="en",
+        )
+        assert len(paths) == 1
+        assert paths[0].endswith(".md")
+        assert os.path.exists(paths[0])
+        content = open(paths[0]).read()
+        assert "# Test Video Title" in content
+        assert "**Channel**: Test Channel" in content
+        assert "whisper (large-v3 / grc)" in content
+
+
+def test_format_output_json_creates_file():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        paths = format_output(
+            _sample_segments(), _sample_metadata(), "json", tmpdir,
+            model="large-v3", prompt_profile="grc", method="whisper", language="en",
+        )
+        assert len(paths) == 1
+        assert paths[0].endswith(".json")
+        data = json.loads(open(paths[0]).read())
+        assert data["video_id"] == "test123"
+        assert data["transcription_method"] == "whisper"
+        assert data["model"] == "large-v3"
+        assert len(data["segments"]) == 2
+        assert data["word_count"] == 6
+
+
+def test_format_output_both_creates_two_files():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        paths = format_output(
+            _sample_segments(), _sample_metadata(), "both", tmpdir,
+            model="large-v3", prompt_profile="general", method="whisper", language="en",
+        )
+        assert len(paths) == 2
+        extensions = {os.path.splitext(p)[1] for p in paths}
+        assert extensions == {".md", ".json"}
+
+
+def test_format_output_youtube_subs_string_input():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        paths = format_output(
+            "Hello world. This is a test.", _sample_metadata(), "json", tmpdir,
+            model=None, prompt_profile=None, method="youtube_subs", language="en",
+        )
+        data = json.loads(open(paths[0]).read())
+        assert data["transcription_method"] == "youtube_subs"
+        assert data["segments"] is None
+        assert data["model"] is None
+
+
+def test_format_output_md_general_prompt_no_slash():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        paths = format_output(
+            _sample_segments(), _sample_metadata(), "md", tmpdir,
+            model="large-v3", prompt_profile="general", method="whisper", language="en",
+        )
+        content = open(paths[0]).read()
+        assert "whisper (large-v3)" in content
+        assert "/ general" not in content
