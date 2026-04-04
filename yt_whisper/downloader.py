@@ -114,7 +114,9 @@ def check_subtitles(url, language="en"):
         text = re.sub(r'\n+', ' ', text)
         text = re.sub(r'\s+', ' ', text).strip()
 
-    return text if text else None, metadata
+    if not text:
+        return None, metadata
+    return text, metadata
 
 
 def download_audio(url, temp_dir, metadata, verbose=False):
