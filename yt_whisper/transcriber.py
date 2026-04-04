@@ -40,7 +40,7 @@ def transcribe(audio_path, model_size, prompt_text, language, verbose):
         model = WhisperModel(model_size, device=device, compute_type=compute_type)
     except (RuntimeError, ValueError) as e:
         print(
-            f"Warning: CUDA unavailable — falling back to CPU. "
+            f"Warning: CUDA unavailable -- falling back to CPU. "
             f"This will be significantly slower. "
             f"Check NVIDIA drivers and CUDA toolkit. ({e})"
         )
@@ -60,7 +60,7 @@ def transcribe(audio_path, model_size, prompt_text, language, verbose):
     for seg in segments_gen:
         text = seg.text.strip()
         if verbose:
-            print(f"  [{seg.start:.1f}s → {seg.end:.1f}s] {text}")
+            print(f"  [{seg.start:.1f}s -> {seg.end:.1f}s] {text}")
         segments.append({
             "start": round(seg.start, 2),
             "end": round(seg.end, 2),

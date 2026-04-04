@@ -77,6 +77,7 @@ def test_transcribe_cuda_fallback_to_cpu(mock_preload, capsys):
     captured = capsys.readouterr()
     assert "CUDA unavailable" in captured.out
     assert "falling back to CPU" in captured.out
+    assert "--" in captured.out  # ASCII em dash
 
     # Verify second call used cpu/int8
     calls = mock_fw.WhisperModel.call_args_list
