@@ -106,6 +106,49 @@ async def test_diarize_toggle_no_modal_when_ready(tmp_path, monkeypatch):
         assert not any(isinstance(s, DiarizeSetupModal) for s in app.screen_stack)
 
 
+async def test_run_worker_suppresses_stdout(tmp_path):
+    """Worker thread must not leak library noise to real stdout/stderr."""
+    import contextlib
+    import sys
+    from unittest.mock import patch, MagicMock
+
+    stdout_redirected = []
+    stderr_redirected = []
+    original_redirect_stdout = contextlib.redirect_stdout
+    original_redirect_stderr = contextlib.redirect_stderr
+
+    def tracking_redirect_stdout(target):
+        stdout_redirected.append(target)
+        return original_redirect_stdout(target)
+
+    def tracking_redirect_stderr(target):
+        stderr_redirected.append(target)
+        return original_redirect_stderr(target)
+
+    def noisy_run(cfg, listener, cancel_event=None):
+        # Simulate library writing directly to stdout/stderr
+        print("NOISE_STDOUT", flush=True)
+        print("NOISE_STDERR", file=sys.stderr, flush=True)
+
+    app = YtWhisperApp(output_dir=str(tmp_path))
+    async with app.run_test() as pilot:
+        app.query_one("#url-input").value = "https://yt/abc"
+        with patch("yt_whisper.tui.app.run", side_effect=noisy_run), \
+             patch("yt_whisper.tui.app.contextlib.redirect_stdout", side_effect=tracking_redirect_stdout), \
+             patch("yt_whisper.tui.app.contextlib.redirect_stderr", side_effect=tracking_redirect_stderr):
+            app.start_run(app.build_runconfig())
+            await pilot.pause(0.5)
+
+    # Both redirects must have been called with StringIO targets (not real stdout/stderr)
+    import io
+    assert len(stdout_redirected) >= 1, "redirect_stdout was never called in worker"
+    assert len(stderr_redirected) >= 1, "redirect_stderr was never called in worker"
+    assert all(isinstance(t, io.StringIO) for t in stdout_redirected), \
+        "redirect_stdout target must be StringIO, not devnull or real stdout"
+    assert all(isinstance(t, io.StringIO) for t in stderr_redirected), \
+        "redirect_stderr target must be StringIO, not devnull or real stderr"
+
+
 async def test_preview_screen_renders_markdown(tmp_path):
     md_path = tmp_path / "abc.md"
     md_path.write_text("# Hello\n\nSome text.")
