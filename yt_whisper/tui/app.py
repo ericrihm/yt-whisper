@@ -6,7 +6,7 @@ import threading
 from textual import work
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.screen import Screen
+from textual.screen import Screen, ModalScreen
 from textual.widgets import (
     Header, Footer, Input, Select, Checkbox, Button, Label, ListView, ListItem,
     RadioSet, RadioButton, Static, ProgressBar, RichLog, Markdown,
@@ -20,6 +20,80 @@ from yt_whisper.tui.listener import TuiListener
 MODEL_CHOICES = [("tiny", "tiny"), ("base", "base"), ("small", "small"),
                  ("medium", "medium"), ("large-v3", "large-v3")]
 PROFILE_CHOICES = [("general", "general"), ("grc", "grc"), ("infosec", "infosec")]
+
+
+class DiarizeSetupModal(ModalScreen):
+    """Modal shown when Diarize is toggled on but HF_TOKEN or pyannote is missing."""
+
+    BINDINGS = [
+        ("escape", "dismiss_modal", "Close"),
+        ("enter", "dismiss_modal", "Close"),
+    ]
+
+    CSS = """
+    DiarizeSetupModal {
+        align: center middle;
+    }
+    #diarize-modal-box {
+        width: 80;
+        height: auto;
+        max-height: 80%;
+        border: tall $primary;
+        background: $surface;
+        padding: 1 2;
+    }
+    #diarize-modal-body {
+        height: auto;
+    }
+    """
+
+    def __init__(self, missing):
+        super().__init__()
+        self.missing = missing
+
+    def compose(self) -> ComposeResult:
+        need_token = "token" in self.missing
+        need_deps = "deps" in self.missing
+
+        lines = ["# Diarization setup needed\n"]
+        if need_deps:
+            lines.append("**1. Install pyannote.audio:**\n")
+            lines.append("```\npip install -r requirements-diarize.txt\n```\n")
+            lines.append("or if installed via pipx:\n")
+            lines.append("```\npipx inject yt-whisper pyannote.audio torchaudio\n```\n")
+        if need_token:
+            step = "2" if need_deps else "1"
+            lines.append(f"**{step}. Accept the model license:**\n")
+            lines.append(
+                "Visit [https://huggingface.co/pyannote/speaker-diarization-3.1]"
+                "(https://huggingface.co/pyannote/speaker-diarization-3.1) "
+                "and click **Accept**.\n"
+            )
+            step = "3" if need_deps else "2"
+            lines.append(f"**{step}. Get a HuggingFace token:**\n")
+            lines.append(
+                "Generate a read token at "
+                "[https://huggingface.co/settings/tokens]"
+                "(https://huggingface.co/settings/tokens)\n"
+            )
+            step = "4" if need_deps else "3"
+            lines.append(f"**{step}. Set the token:**\n")
+            lines.append("PowerShell:\n")
+            lines.append("```\n$env:HF_TOKEN=\"hf_...\"\n```\n")
+            lines.append("or add `HF_TOKEN=hf_...` to a `.env` file in the project root.\n")
+        lines.append("\n_Press Escape or Enter to close. Diarize stays toggled on — "
+                     "finish setup, then restart yt-whisper._")
+
+        with Vertical(id="diarize-modal-box"):
+            yield Markdown("\n".join(lines), id="diarize-modal-body")
+            yield Button("Close", id="diarize-close-btn", variant="primary")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "diarize-close-btn":
+            self.dismiss()
+
+    def action_dismiss_modal(self) -> None:
+        self.dismiss()
 
 
 class HomeScreen(Screen):
@@ -75,6 +149,24 @@ class HomeScreen(Screen):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "run-btn":
             self.action_run()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        """Pressing Enter in any form input kicks off the run."""
+        self.action_run()
+
+    def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
+        """When user toggles Diarize on, check setup and guide them if missing."""
+        if event.checkbox.id != "diarize-toggle" or not event.value:
+            return
+        missing = []
+        if not os.environ.get("HF_TOKEN"):
+            missing.append("token")
+        try:
+            import pyannote.audio  # noqa: F401
+        except ImportError:
+            missing.append("deps")
+        if missing:
+            self.app.push_screen(DiarizeSetupModal(missing))
 
     def action_run(self) -> None:
         cfg = self.app.build_runconfig()
