@@ -8,3 +8,7 @@ __pycache__/
 dist/
 build/
 .pytest_cache/
+
+# AI assistant config
+CLAUDE.md
+.claude/
