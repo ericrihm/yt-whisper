@@ -290,3 +290,84 @@ def test_run_cancellation_stops_segments(tmpdir_out):
     segments = [e for e in listener.events if e[0] == "segment"]
     # Should have stopped early (not all 100)
     assert len(segments) < 100
+
+
+# --- Fix 1: transcribe progress bar ---
+
+def test_run_emits_transcribe_progress(tmpdir_out):
+    """on_progress('transcribe', pct) should be called during the transcribe loop."""
+    from yt_whisper.runner import run
+    cfg = RunConfig(url="https://yt/abc", output_dir=tmpdir_out, force_whisper=True)
+    listener = _Capture()
+
+    # duration=120s; segments end at 60s and 90s -> pct 0.5 and 0.75
+    def fake_transcribe(*args, **kwargs):
+        yield {"start": 0.0, "end": 60.0, "text": "first", "speaker": None}
+        yield {"start": 60.0, "end": 90.0, "text": "second", "speaker": None}
+
+    with patch("yt_whisper.runner.check_subtitles") as mock_subs, \
+         patch("yt_whisper.runner.download_audio") as mock_dl, \
+         patch("yt_whisper.runner.transcribe", side_effect=fake_transcribe):
+        mock_subs.return_value = (None, _fake_metadata(duration=120))
+        mock_dl.return_value = "/tmp/fake.wav"
+        run(cfg, listener)
+
+    progress_events = [
+        e for e in listener.events
+        if e[0] == "progress" and e[1] == "transcribe"
+    ]
+    assert len(progress_events) >= 1, "Expected at least one transcribe progress event"
+    # All progress values should be > 0.1 (well past the initial 10% shown by TUI)
+    for evt in progress_events:
+        assert evt[2] > 0.1, f"Expected pct > 0.1, got {evt[2]}"
+
+
+def test_run_transcribe_progress_zero_duration(tmpdir_out):
+    """No on_progress('transcribe') events when duration is 0 (avoid division by zero)."""
+    from yt_whisper.runner import run
+    cfg = RunConfig(url="https://yt/abc", output_dir=tmpdir_out, force_whisper=True)
+    listener = _Capture()
+
+    def fake_transcribe(*args, **kwargs):
+        yield {"start": 0.0, "end": 1.0, "text": "hi", "speaker": None}
+
+    with patch("yt_whisper.runner.check_subtitles") as mock_subs, \
+         patch("yt_whisper.runner.download_audio") as mock_dl, \
+         patch("yt_whisper.runner.transcribe", side_effect=fake_transcribe):
+        mock_subs.return_value = (None, _fake_metadata(duration=0))
+        mock_dl.return_value = "/tmp/fake.wav"
+        run(cfg, listener)
+
+    progress_events = [
+        e for e in listener.events
+        if e[0] == "progress" and e[1] == "transcribe"
+    ]
+    assert len(progress_events) == 0, "Should emit no transcribe progress when duration is 0"
+
+
+# --- Fix 2: log prompt profile ---
+
+def test_run_logs_prompt_profile_manual(tmpdir_out):
+    """on_log should be called with a message containing 'Prompt profile: infosec'."""
+    from yt_whisper.runner import run
+    cfg = RunConfig(
+        url="https://yt/abc", output_dir=tmpdir_out,
+        force_whisper=True, prompt_profile="infosec",
+    )
+    listener = _Capture()
+
+    def fake_transcribe(*args, **kwargs):
+        yield {"start": 0.0, "end": 1.0, "text": "hi", "speaker": None}
+
+    with patch("yt_whisper.runner.check_subtitles") as mock_subs, \
+         patch("yt_whisper.runner.download_audio") as mock_dl, \
+         patch("yt_whisper.runner.transcribe", side_effect=fake_transcribe):
+        mock_subs.return_value = (None, _fake_metadata())
+        mock_dl.return_value = "/tmp/fake.wav"
+        run(cfg, listener)
+
+    log_events = [e for e in listener.events if e[0] == "log"]
+    matching = [e for e in log_events if "Prompt profile:" in e[2] and "infosec" in e[2]]
+    assert len(matching) >= 1, (
+        f"Expected a log containing 'Prompt profile: infosec', got logs: {log_events}"
+    )

@@ -20,7 +20,7 @@ def _check_model_cached(model_size):
     return os.path.isdir(os.path.join(cache_dir, model_dir))
 
 
-def transcribe(audio_path, model_size, prompt_text, language, verbose):
+def transcribe(audio_path, model_size, prompt_text, language, verbose, listener=None):
     """Yield transcription segments one at a time.
 
     Each yielded segment: {"start", "end", "text", "speaker": None}.
@@ -38,6 +38,8 @@ def transcribe(audio_path, model_size, prompt_text, language, verbose):
             size_hint = "~3GB" if "large" in model_size else "~1GB"
             print(f"Downloading Whisper model '{model_size}' ({size_hint}). One-time download.")
         model = WhisperModel(model_size, device=device, compute_type=compute_type)
+        if listener is not None:
+            listener.on_log("info", "whisper: using cuda (float16)")
     except (RuntimeError, ValueError) as e:
         print(
             f"Warning: CUDA unavailable -- falling back to CPU. "
@@ -47,6 +49,8 @@ def transcribe(audio_path, model_size, prompt_text, language, verbose):
         device = "cpu"
         compute_type = "int8"
         model = WhisperModel(model_size, device=device, compute_type=compute_type)
+        if listener is not None:
+            listener.on_log("warning", f"whisper: CUDA unavailable, using cpu (int8) -- {e}")
 
     segments_gen, info = model.transcribe(
         audio_path,

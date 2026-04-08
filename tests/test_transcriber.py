@@ -102,3 +102,60 @@ def test_transcribe_yields_speaker_none(mock_preload):
         from yt_whisper.transcriber import transcribe
         segs = list(transcribe("test.wav", "tiny", None, "en", False))
     assert segs[0]["speaker"] is None
+
+
+# --- Fix 3: log GPU vs CPU device selection ---
+
+@patch("yt_whisper.transcriber.cuda_preload")
+def test_transcribe_listener_logs_cuda(mock_preload):
+    """When CUDA succeeds, listener.on_log is called with a message containing 'cuda'."""
+    mock_fw = MagicMock()
+    mock_model = MagicMock()
+    mock_fw.WhisperModel.return_value = mock_model
+    mock_model.transcribe.return_value = (
+        iter([_mock_segment(0.0, 1.0, " hi")]),
+        MagicMock(),
+    )
+
+    listener = MagicMock()
+
+    with patch.dict("sys.modules", {"faster_whisper": mock_fw}):
+        from yt_whisper.transcriber import transcribe
+        list(transcribe("test.wav", "tiny", None, "en", False, listener=listener))
+
+    # listener.on_log should have been called with a message containing "cuda"
+    calls = listener.on_log.call_args_list
+    cuda_calls = [c for c in calls if "cuda" in str(c).lower()]
+    assert len(cuda_calls) >= 1, f"Expected on_log with 'cuda', got calls: {calls}"
+
+
+@patch("yt_whisper.transcriber.cuda_preload")
+def test_transcribe_listener_logs_cpu_fallback(mock_preload, capsys):
+    """When CUDA fails, listener.on_log is called with level 'warning' and message containing 'cpu'."""
+    mock_fw = MagicMock()
+    mock_cpu_model = MagicMock()
+    mock_cpu_model.transcribe.return_value = (
+        iter([_mock_segment(0.0, 1.0, " fallback")]),
+        MagicMock(),
+    )
+    mock_fw.WhisperModel.side_effect = [RuntimeError("CUDA error"), mock_cpu_model]
+
+    listener = MagicMock()
+
+    with patch.dict("sys.modules", {"faster_whisper": mock_fw}):
+        from yt_whisper.transcriber import transcribe
+        list(transcribe("test.wav", "tiny", None, "en", False, listener=listener))
+
+    # listener.on_log should have been called with level "warning" and message containing "cpu"
+    calls = listener.on_log.call_args_list
+    warning_cpu_calls = [
+        c for c in calls
+        if c[0][0] == "warning" and "cpu" in c[0][1].lower()
+    ]
+    assert len(warning_cpu_calls) >= 1, (
+        f"Expected on_log('warning', '...cpu...'), got calls: {calls}"
+    )
+
+    # Existing print-based test still works -- stdout should still have the warning
+    captured = capsys.readouterr()
+    assert "CUDA unavailable" in captured.out

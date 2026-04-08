@@ -133,6 +133,7 @@ def run(config: RunConfig, listener: Listener, cancel_event: Optional[threading.
 
         # Resolve prompt text from the (possibly auto-detected) profile
         prompt_text = resolve_prompt(effective_profile)
+        listener.on_log("info", f"Prompt profile: {effective_profile}")
 
         # Subtitle fast path
         if subtitle_text and not config.force_whisper:
@@ -165,14 +166,19 @@ def run(config: RunConfig, listener: Listener, cancel_event: Optional[threading.
                 # Phase 3: transcribe (streaming)
                 listener.on_phase("transcribe", "start")
                 collected = []
+                duration = metadata.get("duration") or 0
                 for seg in transcribe(
-                    audio_path, config.model, prompt_text, config.language, config.verbose
+                    audio_path, config.model, prompt_text, config.language, config.verbose,
+                    listener=listener,
                 ):
                     if cancelled():
                         listener.on_log("info", "Cancelled.")
                         return None
                     collected.append(seg)
                     listener.on_segment(seg)
+                    if duration > 0:
+                        pct = min(seg["end"] / duration, 1.0)
+                        listener.on_progress("transcribe", pct)
                 listener.on_phase("transcribe", "done")
 
                 if not collected:
