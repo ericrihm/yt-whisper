@@ -56,3 +56,15 @@ async def test_run_screen_mounts_on_start(tmp_path):
             await pilot.pause(0.3)
         from yt_whisper.tui.app import RunScreen
         assert any(isinstance(s, RunScreen) for s in app.screen_stack)
+
+
+async def test_preview_screen_renders_markdown(tmp_path):
+    md_path = tmp_path / "abc.md"
+    md_path.write_text("# Hello\n\nSome text.")
+    from yt_whisper.tui.app import PreviewScreen
+
+    app = YtWhisperApp(output_dir=str(tmp_path))
+    async with app.run_test() as pilot:
+        app.push_screen(PreviewScreen(str(md_path)))
+        await pilot.pause(0.1)
+        assert app.query_one("#preview-md") is not None

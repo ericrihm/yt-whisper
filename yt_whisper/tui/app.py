@@ -9,7 +9,7 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
 from textual.widgets import (
     Header, Footer, Input, Select, Checkbox, Button, Label, ListView, ListItem,
-    RadioSet, RadioButton, Static, ProgressBar, RichLog,
+    RadioSet, RadioButton, Static, ProgressBar, RichLog, Markdown,
 )
 
 from yt_whisper.runner import RunConfig, run
@@ -103,8 +103,15 @@ class HomeScreen(Screen):
         self.refresh_history()
 
     def action_preview(self) -> None:
-        # Preview screen implemented in Task 12
-        self.app.bell()
+        idx = self.query_one("#history-list", ListView).index
+        if idx is None or idx >= len(self.app._history_cache):
+            return
+        entry = self.app._history_cache[idx]
+        md_path = entry.get("md_path")
+        if md_path:
+            self.app.push_screen(PreviewScreen(md_path))
+        else:
+            self.app.bell()
 
 
 class RunScreen(Screen):
@@ -144,6 +151,38 @@ class RunScreen(Screen):
             self.query_one("#log-view", RichLog).write("[yellow]Cancelling...[/yellow]")
         except Exception:
             pass
+
+
+class PreviewScreen(Screen):
+    """Renders a completed transcript's markdown file."""
+
+    BINDINGS = [
+        ("escape", "back", "Back"),
+        ("o", "open_file", "Open in editor"),
+    ]
+
+    def __init__(self, md_path: str):
+        super().__init__()
+        self.md_path = md_path
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        try:
+            with open(self.md_path, encoding="utf-8") as f:
+                content = f.read()
+        except OSError:
+            content = f"Could not read {self.md_path}"
+        yield Markdown(content, id="preview-md")
+        yield Footer()
+
+    def action_back(self) -> None:
+        self.app.pop_screen()
+
+    def action_open_file(self) -> None:
+        try:
+            os.startfile(self.md_path)  # Windows only
+        except Exception:
+            self.app.bell()
 
 
 class YtWhisperApp(App):
@@ -270,7 +309,9 @@ class YtWhisperApp(App):
         log = self._log()
         if log:
             log.write(f"[green]DONE[/green] -> {result['paths']}")
-        # Auto-navigate to preview: implemented in Task 12
+        md_path = next((p for p in result["paths"] if p.endswith(".md")), None)
+        if md_path:
+            self.push_screen(PreviewScreen(md_path))
 
     def tui_on_error(self, msg):
         log = self._log()
