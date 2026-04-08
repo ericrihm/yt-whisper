@@ -122,3 +122,45 @@ Transcripts are saved to `./transcripts/` by default (configurable with `--outpu
 - **"No speech detected"**: VAD filter found no speech. Common with music-only content. Try a different video or a larger model.
 - **"Low word count" warning**: Transcript may be incomplete. Try `--force-whisper` if using YouTube subs, or a larger `--model`.
 - **"High word count" warning**: May indicate Whisper hallucination (repeated phrases). Check output for repetition.
+
+## Optional: Speaker Diarization
+
+Diarization labels distinct speakers in the transcript. It is off by default and requires extra setup.
+
+**Install the extra dependencies:**
+
+```bash
+.venv/Scripts/python.exe -m pip install -r requirements-diarize.txt
+```
+
+**Accept the model license and get a token:**
+
+1. Create a free account at https://huggingface.co/
+2. Visit https://huggingface.co/pyannote/speaker-diarization-3.1 and accept the user agreement
+3. Generate a token at https://huggingface.co/settings/tokens (read access is sufficient)
+4. Set the environment variable `HF_TOKEN`:
+   - Powershell: `$env:HF_TOKEN="hf_..."`
+   - Or put it in a `.env` file next to the project (python-dotenv will load it)
+
+**Use it:**
+
+```bash
+yt-whisper <url> --diarize
+yt-whisper <url> --diarize --speakers 3   # if you know the count
+```
+
+In the TUI, toggle the "Diarize" checkbox on the home screen. If dependencies or the token are missing, the runner emits a clean error with install instructions.
+
+## Interactive TUI
+
+Running `yt-whisper` with no arguments launches a full-screen interactive UI with three screens:
+
+- **Home** -- paste a URL, pick model/language/profile/diarize/format, see past runs
+- **Run** -- live progress bars, streaming transcript, and log panel while the pipeline executes
+- **Preview** -- rendered markdown of a completed transcript
+
+Keyboard-first. Press `Q` to quit, `R` to re-run a past entry, `P` to preview, `D` to delete.
+
+## Prompt Profile Auto-Detection
+
+When you don't pass `--prompt`, yt-whisper inspects the video's title, channel, description, and tags and picks the best matching profile (general, grc, infosec) using keyword matching. Pass `--prompt <name>` explicitly to override.
