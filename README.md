@@ -291,6 +291,20 @@ See `docs/superpowers/` for the design spec and implementation plan.
 
 ---
 
+## Changelog
+
+### Unreleased
+
+- **TUI**: live transcribe progress bar now updates per segment (previously stuck at 10%)
+- **TUI**: pressing Enter in any form input kicks off the run (not just the Run button)
+- **TUI**: toggling Diarize on without `HF_TOKEN` or `pyannote.audio` pops a setup modal with clickable HuggingFace links and copyable install commands
+- **TUI**: worker thread now redirects stdout/stderr so library noise (tqdm, CUDA init, faster-whisper, yt-dlp) can't corrupt Textual's alternate screen buffer
+- **Runner**: logs the active prompt profile on every run (`Prompt profile: grc`)
+- **Runner**: logs GPU vs CPU device selection (`whisper: using cuda (float16)` or `whisper: using cpu (int8) -- <err>`)
+- **Tests**: 107 passing (up from 98)
+
+---
+
 ## License
 
 MIT
