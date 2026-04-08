@@ -1,5 +1,7 @@
 """Textual TUI for yt-whisper: Home, Run, and Preview screens."""
 
+import contextlib
+import io
 import os
 import threading
 
@@ -328,7 +330,11 @@ class YtWhisperApp(App):
     @work(thread=True)
     def _run_worker(self, cfg: RunConfig, cancel_event: threading.Event) -> None:
         listener = TuiListener(self)
-        run(cfg, listener, cancel_event=cancel_event)
+        # Suppress stdout/stderr in the worker: library noise (tqdm, CUDA init,
+        # faster-whisper, yt-dlp) would otherwise corrupt Textual's alternate
+        # screen buffer. Real events reach the UI via `listener`.
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            run(cfg, listener, cancel_event=cancel_event)
 
     def _pb(self, phase: str):
         try:
