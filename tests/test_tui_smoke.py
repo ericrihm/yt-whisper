@@ -58,6 +58,54 @@ async def test_run_screen_mounts_on_start(tmp_path):
         assert any(isinstance(s, RunScreen) for s in app.screen_stack)
 
 
+async def test_enter_in_url_input_starts_run(tmp_path):
+    """Pressing Enter in the URL input should trigger action_run."""
+    from unittest.mock import patch
+
+    app = YtWhisperApp(output_dir=str(tmp_path))
+    async with app.run_test() as pilot:
+        app.query_one("#url-input").value = "https://yt/abc"
+        with patch("yt_whisper.tui.app.run", return_value=None):
+            await pilot.press("tab")  # ensure focus somewhere
+            app.query_one("#url-input").focus()
+            await pilot.press("enter")
+            await pilot.pause(0.3)
+        from yt_whisper.tui.app import RunScreen
+        assert any(isinstance(s, RunScreen) for s in app.screen_stack)
+
+
+async def test_diarize_toggle_shows_modal_when_missing(tmp_path, monkeypatch):
+    """Toggling Diarize on without HF_TOKEN should push the setup modal."""
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    app = YtWhisperApp(output_dir=str(tmp_path))
+    async with app.run_test() as pilot:
+        app.query_one("#diarize-toggle").value = True
+        await pilot.pause(0.1)
+        from yt_whisper.tui.app import DiarizeSetupModal
+        assert any(isinstance(s, DiarizeSetupModal) for s in app.screen_stack)
+
+
+async def test_diarize_toggle_no_modal_when_ready(tmp_path, monkeypatch):
+    """If HF_TOKEN is set and pyannote is importable, no modal should appear."""
+    monkeypatch.setenv("HF_TOKEN", "hf_fake")
+    import sys
+    import types
+    # Stub pyannote.audio so the import check passes
+    if "pyannote" not in sys.modules:
+        pyannote_mod = types.ModuleType("pyannote")
+        pyannote_audio_mod = types.ModuleType("pyannote.audio")
+        pyannote_mod.audio = pyannote_audio_mod
+        sys.modules["pyannote"] = pyannote_mod
+        sys.modules["pyannote.audio"] = pyannote_audio_mod
+
+    app = YtWhisperApp(output_dir=str(tmp_path))
+    async with app.run_test() as pilot:
+        app.query_one("#diarize-toggle").value = True
+        await pilot.pause(0.1)
+        from yt_whisper.tui.app import DiarizeSetupModal
+        assert not any(isinstance(s, DiarizeSetupModal) for s in app.screen_stack)
+
+
 async def test_preview_screen_renders_markdown(tmp_path):
     md_path = tmp_path / "abc.md"
     md_path.write_text("# Hello\n\nSome text.")
