@@ -123,10 +123,13 @@ def test_transcribe_listener_logs_cuda(mock_preload):
         from yt_whisper.transcriber import transcribe
         list(transcribe("test.wav", "tiny", None, "en", False, listener=listener))
 
-    # listener.on_log should have been called with a message containing "cuda"
+    # listener.on_log should have been called with level "info" and message containing "cuda"
     calls = listener.on_log.call_args_list
-    cuda_calls = [c for c in calls if "cuda" in str(c).lower()]
-    assert len(cuda_calls) >= 1, f"Expected on_log with 'cuda', got calls: {calls}"
+    info_cuda_calls = [
+        c for c in calls
+        if c[0][0] == "info" and "cuda" in c[0][1].lower()
+    ]
+    assert len(info_cuda_calls) >= 1, f"Expected on_log('info', '...cuda...'), got calls: {calls}"
 
 
 @patch("yt_whisper.transcriber.cuda_preload")

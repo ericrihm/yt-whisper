@@ -316,10 +316,10 @@ def test_run_emits_transcribe_progress(tmpdir_out):
         e for e in listener.events
         if e[0] == "progress" and e[1] == "transcribe"
     ]
-    assert len(progress_events) >= 1, "Expected at least one transcribe progress event"
-    # All progress values should be > 0.1 (well past the initial 10% shown by TUI)
-    for evt in progress_events:
-        assert evt[2] > 0.1, f"Expected pct > 0.1, got {evt[2]}"
+    assert len(progress_events) == 2, f"Expected exactly 2 transcribe progress events, got {len(progress_events)}"
+    # duration=120s; segments end at 60s and 90s -> exact pcts 0.5 and 0.75
+    pcts = [e[2] for e in progress_events]
+    assert pcts == [0.5, 0.75], f"Expected pcts [0.5, 0.75], got {pcts}"
 
 
 def test_run_transcribe_progress_zero_duration(tmpdir_out):
@@ -361,7 +361,8 @@ def test_run_logs_prompt_profile_manual(tmpdir_out):
 
     with patch("yt_whisper.runner.check_subtitles") as mock_subs, \
          patch("yt_whisper.runner.download_audio") as mock_dl, \
-         patch("yt_whisper.runner.transcribe", side_effect=fake_transcribe):
+         patch("yt_whisper.runner.transcribe", side_effect=fake_transcribe), \
+         patch("yt_whisper.runner.format_output", return_value=["/tmp/fake.md", "/tmp/fake.json"]):
         mock_subs.return_value = (None, _fake_metadata())
         mock_dl.return_value = "/tmp/fake.wav"
         run(cfg, listener)

@@ -39,7 +39,7 @@ def transcribe(audio_path, model_size, prompt_text, language, verbose, listener=
             print(f"Downloading Whisper model '{model_size}' ({size_hint}). One-time download.")
         model = WhisperModel(model_size, device=device, compute_type=compute_type)
         if listener is not None:
-            listener.on_log("info", "whisper: using cuda (float16)")
+            listener.on_log("info", f"whisper: using {device} ({compute_type})")
     except (RuntimeError, ValueError) as e:
         print(
             f"Warning: CUDA unavailable -- falling back to CPU. "
@@ -50,7 +50,7 @@ def transcribe(audio_path, model_size, prompt_text, language, verbose, listener=
         compute_type = "int8"
         model = WhisperModel(model_size, device=device, compute_type=compute_type)
         if listener is not None:
-            listener.on_log("warning", f"whisper: CUDA unavailable, using cpu (int8) -- {e}")
+            listener.on_log("warning", f"whisper: CUDA unavailable, using {device} ({compute_type}) -- {e}")
 
     segments_gen, info = model.transcribe(
         audio_path,
