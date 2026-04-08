@@ -392,7 +392,7 @@ If the Preview screen proves costly during implementation, it can ship as a foll
 - `yt_whisper/prompts.py` — keyword lists
 - `requirements.txt` — add textual, python-dotenv
 - `README.md` — optional diarization section
-- `CLAUDE.md` — new anti-patterns (pyannote local import, TUI threading)
+- `AGENTS.md` — new anti-patterns (pyannote local import, TUI threading)
 - `tests/test_transcriber.py` — generator interface
 - `tests/test_formatter.py` — speaker rendering
 - `tests/test_prompts.py` — keyword validation

@@ -36,7 +36,7 @@
 - `yt_whisper/cli.py` — thin shim: no-args → TUI, else RunConfig → runner
 - `requirements.txt` — add textual, python-dotenv
 - `README.md` — optional diarization section
-- `CLAUDE.md` — new anti-patterns
+- `AGENTS.md` — new anti-patterns
 - `tests/test_transcriber.py` — generator interface
 - `tests/test_formatter.py` — speaker rendering + config block
 - `tests/test_prompts.py` — keyword validation + new dict shape
@@ -2755,14 +2755,14 @@ git commit -m "feat(tui): Preview screen and auto-navigate on run completion"
 
 ---
 
-## Task 13: `requirements-diarize.txt` and README / CLAUDE.md updates
+## Task 13: `requirements-diarize.txt` and README / AGENTS.md updates
 
 Add the optional diarization requirements file and update documentation.
 
 **Files:**
 - Create: `requirements-diarize.txt`
 - Modify: `README.md`
-- Modify: `CLAUDE.md`
+- Modify: `AGENTS.md`
 
 - [ ] **Step 1: Create `requirements-diarize.txt`**
 
@@ -2816,9 +2816,9 @@ Keyboard-first. Press `Q` to quit, `R` to re-run a past entry, `P` to preview, `
 When you don't pass `--prompt`, yt-whisper inspects the video's title, channel, description, and tags and picks the best matching profile (general, grc, infosec) using keyword matching. Pass `--prompt <name>` explicitly to override.
 ```
 
-- [ ] **Step 3: Update `CLAUDE.md`**
+- [ ] **Step 3: Update `AGENTS.md`**
 
-Read `CLAUDE.md` fully. Under "Key Constraints" add:
+Read `AGENTS.md` fully. Under "Key Constraints" add:
 
 ```markdown
 - **Anti-Pattern #1 (extended)**: Never import `faster_whisper` OR `pyannote.audio` at module top level. Both must be local imports inside their respective functions (`transcribe()` / `diarize()`) after `cuda_preload.ensure_dlls()`. pyannote is an *optional* dependency; module import must never fail for users without it.
@@ -2850,7 +2850,7 @@ Expected: all tests PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add requirements-diarize.txt README.md CLAUDE.md
+git add requirements-diarize.txt README.md AGENTS.md
 git commit -m "docs: optional diarization setup, TUI usage, updated anti-patterns"
 ```
 
