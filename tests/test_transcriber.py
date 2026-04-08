@@ -1,3 +1,4 @@
+import types
 import pytest
 from unittest.mock import patch, MagicMock, call
 from yt_whisper.transcriber import TranscriptionError
@@ -31,26 +32,13 @@ def test_transcribe_calls_cuda_preload(mock_preload):
     # Patch sys.modules to intercept the local 'from faster_whisper import WhisperModel'
     with patch.dict("sys.modules", {"faster_whisper": mock_fw}):
         from yt_whisper.transcriber import transcribe
-        result = transcribe("test.wav", "tiny", None, "en", False)
+        result = list(transcribe("test.wav", "tiny", None, "en", False))
 
     mock_preload.ensure_dlls.assert_called_once()
     assert len(result) == 1
     assert result[0]["text"] == "Hello world."
     assert result[0]["start"] == 0.0
     assert result[0]["end"] == 3.0
-
-
-@patch("yt_whisper.transcriber.cuda_preload")
-def test_transcribe_empty_segments_raises(mock_preload):
-    mock_fw = MagicMock()
-    mock_model = MagicMock()
-    mock_fw.WhisperModel.return_value = mock_model
-    mock_model.transcribe.return_value = (iter([]), MagicMock())
-
-    with patch.dict("sys.modules", {"faster_whisper": mock_fw}):
-        from yt_whisper.transcriber import transcribe
-        with pytest.raises(TranscriptionError, match="No speech detected"):
-            transcribe("test.wav", "tiny", None, "en", False)
 
 
 @patch("yt_whisper.transcriber.cuda_preload")
@@ -69,7 +57,7 @@ def test_transcribe_cuda_fallback_to_cpu(mock_preload, capsys):
 
     with patch.dict("sys.modules", {"faster_whisper": mock_fw}):
         from yt_whisper.transcriber import transcribe
-        result = transcribe("test.wav", "tiny", None, "en", False)
+        result = list(transcribe("test.wav", "tiny", None, "en", False))
 
     assert len(result) == 1
     assert result[0]["text"] == "Fallback text."
@@ -82,3 +70,35 @@ def test_transcribe_cuda_fallback_to_cpu(mock_preload, capsys):
     # Verify second call used cpu/int8
     calls = mock_fw.WhisperModel.call_args_list
     assert calls[1] == call("tiny", device="cpu", compute_type="int8")
+
+
+@patch("yt_whisper.transcriber.cuda_preload")
+def test_transcribe_is_generator(mock_preload):
+    """transcribe() must return a generator so runner can stream segments."""
+    mock_fw = MagicMock()
+    mock_model = MagicMock()
+    mock_fw.WhisperModel.return_value = mock_model
+    mock_model.transcribe.return_value = (
+        iter([_mock_segment(0.0, 1.0, " hi")]),
+        MagicMock(),
+    )
+    with patch.dict("sys.modules", {"faster_whisper": mock_fw}):
+        from yt_whisper.transcriber import transcribe
+        result = transcribe("test.wav", "tiny", None, "en", False)
+    assert isinstance(result, types.GeneratorType)
+
+
+@patch("yt_whisper.transcriber.cuda_preload")
+def test_transcribe_yields_speaker_none(mock_preload):
+    """Each yielded segment must have speaker=None (diarizer fills it later)."""
+    mock_fw = MagicMock()
+    mock_model = MagicMock()
+    mock_fw.WhisperModel.return_value = mock_model
+    mock_model.transcribe.return_value = (
+        iter([_mock_segment(0.0, 1.0, " hi")]),
+        MagicMock(),
+    )
+    with patch.dict("sys.modules", {"faster_whisper": mock_fw}):
+        from yt_whisper.transcriber import transcribe
+        segs = list(transcribe("test.wav", "tiny", None, "en", False))
+    assert segs[0]["speaker"] is None

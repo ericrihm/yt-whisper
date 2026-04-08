@@ -1,10 +1,8 @@
 """Transcribe audio using faster-whisper with CUDA GPU support."""
 
 import os
-import sys
 
 from yt_whisper import cuda_preload
-
 
 
 class TranscriptionError(Exception):
@@ -23,20 +21,22 @@ def _check_model_cached(model_size):
 
 
 def transcribe(audio_path, model_size, prompt_text, language, verbose):
-    """Transcribe audio file. Returns list of {"start", "end", "text"} dicts."""
+    """Yield transcription segments one at a time.
+
+    Each yielded segment: {"start", "end", "text", "speaker": None}.
+    Caller is responsible for checking whether any segments were produced.
+    """
     cuda_preload.ensure_dlls()
 
-    # Local import — faster_whisper must not be imported at module level (Anti-Pattern #1)
+    # Local import -- faster_whisper must not be imported at module level (Anti-Pattern #1)
     from faster_whisper import WhisperModel
 
-    # Detect CUDA availability
     device = "cuda"
     compute_type = "float16"
     try:
         if not _check_model_cached(model_size):
             size_hint = "~3GB" if "large" in model_size else "~1GB"
             print(f"Downloading Whisper model '{model_size}' ({size_hint}). One-time download.")
-
         model = WhisperModel(model_size, device=device, compute_type=compute_type)
     except (RuntimeError, ValueError) as e:
         print(
@@ -56,18 +56,13 @@ def transcribe(audio_path, model_size, prompt_text, language, verbose):
         initial_prompt=prompt_text,
     )
 
-    segments = []
     for seg in segments_gen:
         text = seg.text.strip()
         if verbose:
             print(f"  [{seg.start:.1f}s -> {seg.end:.1f}s] {text}")
-        segments.append({
+        yield {
             "start": round(seg.start, 2),
             "end": round(seg.end, 2),
             "text": text,
-        })
-
-    if not segments:
-        raise TranscriptionError("No speech detected in audio")
-
-    return segments
+            "speaker": None,
+        }
