@@ -129,3 +129,98 @@ def test_format_output_md_general_prompt_no_slash():
         content = open(paths[0]).read()
         assert "whisper (large-v3)" in content
         assert "/ general" not in content
+
+
+def test_format_markdown_with_speakers(tmp_path):
+    segments = [
+        {"start": 0.0, "end": 2.0, "text": "Hello.", "speaker": "Speaker 1"},
+        {"start": 2.0, "end": 4.0, "text": "Welcome.", "speaker": "Speaker 1"},
+        {"start": 4.0, "end": 6.0, "text": "Thanks!", "speaker": "Speaker 2"},
+        {"start": 6.0, "end": 8.0, "text": "Glad to be here.", "speaker": "Speaker 2"},
+    ]
+    metadata = {
+        "video_id": "abc123", "title": "T", "channel": "C",
+        "upload_date": "20260101", "duration": 8, "url": "u",
+    }
+    paths = format_output(
+        segments, metadata, "md", str(tmp_path),
+        model="small", prompt_profile="general", method="whisper", language="en",
+    )
+    content = open(paths[0], encoding="utf-8").read()
+    assert "**Speaker 1:**" in content
+    assert "**Speaker 2:**" in content
+    s1_idx = content.index("**Speaker 1:**")
+    s2_idx = content.index("**Speaker 2:**")
+    s1_block = content[s1_idx:s2_idx]
+    assert "Hello." in s1_block
+    assert "Welcome." in s1_block
+
+
+def test_format_markdown_without_speakers_unchanged(tmp_path):
+    """Non-diarized output (speaker=None) must not show speaker labels."""
+    segments = [
+        {"start": 0.0, "end": 2.0, "text": "Hello world.", "speaker": None},
+        {"start": 2.0, "end": 4.0, "text": "Second sentence.", "speaker": None},
+    ]
+    metadata = {
+        "video_id": "abc123", "title": "T", "channel": "C",
+        "upload_date": "20260101", "duration": 4, "url": "u",
+    }
+    paths = format_output(
+        segments, metadata, "md", str(tmp_path),
+        model="small", prompt_profile="general", method="whisper", language="en",
+    )
+    content = open(paths[0], encoding="utf-8").read()
+    assert "**Speaker" not in content
+
+
+def test_format_json_includes_speaker_field(tmp_path):
+    segments = [
+        {"start": 0.0, "end": 2.0, "text": "A.", "speaker": "Speaker 1"},
+        {"start": 2.0, "end": 4.0, "text": "B.", "speaker": "Speaker 2"},
+    ]
+    metadata = {
+        "video_id": "abc123", "title": "T", "channel": "C",
+        "upload_date": "20260101", "duration": 4, "url": "u",
+    }
+    paths = format_output(
+        segments, metadata, "json", str(tmp_path),
+        model="small", prompt_profile="general", method="whisper", language="en",
+    )
+    data = json.load(open(paths[0], encoding="utf-8"))
+    assert data["segments"][0]["speaker"] == "Speaker 1"
+    assert data["segments"][1]["speaker"] == "Speaker 2"
+    assert data["speakers"] == ["Speaker 1", "Speaker 2"]
+
+
+def test_format_json_includes_config_block(tmp_path):
+    segments = [{"start": 0.0, "end": 2.0, "text": "A.", "speaker": None}]
+    metadata = {
+        "video_id": "abc123", "title": "T", "channel": "C",
+        "upload_date": "20260101", "duration": 2, "url": "https://yt/abc123",
+    }
+    paths = format_output(
+        segments, metadata, "json", str(tmp_path),
+        model="small", prompt_profile="grc", method="whisper", language="en",
+        config={"url": "https://yt/abc123", "model": "small", "language": "en",
+                "prompt_profile": "grc", "diarize": False, "output_format": "json"},
+    )
+    data = json.load(open(paths[0], encoding="utf-8"))
+    assert "config" in data
+    assert data["config"]["url"] == "https://yt/abc123"
+    assert data["config"]["prompt_profile"] == "grc"
+    assert data["config"]["diarize"] is False
+
+
+def test_format_json_speakers_list_empty_when_no_diarize(tmp_path):
+    segments = [{"start": 0.0, "end": 2.0, "text": "A.", "speaker": None}]
+    metadata = {
+        "video_id": "abc123", "title": "T", "channel": "C",
+        "upload_date": "20260101", "duration": 2, "url": "u",
+    }
+    paths = format_output(
+        segments, metadata, "json", str(tmp_path),
+        model="small", prompt_profile="general", method="whisper", language="en",
+    )
+    data = json.load(open(paths[0], encoding="utf-8"))
+    assert data.get("speakers") == []
