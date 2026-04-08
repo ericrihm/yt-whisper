@@ -1,4 +1,4 @@
-from yt_whisper.cli import build_parser, validate_word_count
+from yt_whisper.cli import build_parser
 
 
 def test_parser_required_url():
@@ -10,7 +10,7 @@ def test_parser_required_url():
 def test_parser_defaults():
     parser = build_parser()
     args = parser.parse_args(["https://youtube.com/watch?v=test"])
-    assert args.prompt == "general"
+    assert args.prompt_profile == "general"
     assert args.force_whisper is False
     assert args.output_dir == "./transcripts"
     assert args.model == "large-v3"
@@ -31,7 +31,7 @@ def test_parser_all_args():
         "--language", "es",
         "--verbose",
     ])
-    assert args.prompt == "grc"
+    assert args.prompt_profile == "grc"
     assert args.force_whisper is True
     assert args.output_dir == "/tmp/out"
     assert args.model == "medium"
@@ -40,36 +40,66 @@ def test_parser_all_args():
     assert args.verbose is True
 
 
-def test_validate_word_count_normal(capsys):
-    wpm = validate_word_count(1500, 600)  # 150 wpm, 10 min
-    captured = capsys.readouterr()
-    assert "Warning" not in captured.out
-    assert wpm == 150.0
+def test_cli_builds_runconfig_from_args(monkeypatch, capsys, tmp_path):
+    from yt_whisper.cli import main
+    from yt_whisper.runner import RunConfig
+    from unittest.mock import patch, MagicMock
+
+    captured_cfg = {}
+
+    def fake_run(cfg, listener, cancel_event=None):
+        captured_cfg["cfg"] = cfg
+        listener.on_done({
+            "paths": [str(tmp_path / "abc.md")],
+            "title": "T", "duration_formatted": "1:00",
+            "word_count": 100, "wpm": 150.0, "method": "whisper",
+        })
+        return {"paths": [str(tmp_path / "abc.md")], "title": "T",
+                "duration_formatted": "1:00", "word_count": 100,
+                "wpm": 150.0, "method": "whisper"}
+
+    argv = ["yt-whisper", "https://yt/abc", "--model", "small",
+            "--diarize", "--speakers", "3", "--output-dir", str(tmp_path)]
+    monkeypatch.setattr("sys.argv", argv)
+    with patch("yt_whisper.cli.run", side_effect=fake_run):
+        main()
+    cfg = captured_cfg["cfg"]
+    assert cfg.url == "https://yt/abc"
+    assert cfg.model == "small"
+    assert cfg.diarize is True
+    assert cfg.num_speakers == 3
+    assert cfg.output_dir == str(tmp_path)
 
 
-def test_validate_word_count_low(capsys):
-    wpm = validate_word_count(200, 600)  # 20 wpm
-    captured = capsys.readouterr()
-    assert "Low word count" in captured.out
-    assert wpm is not None
+def test_cli_no_args_launches_tui(monkeypatch):
+    from yt_whisper.cli import main
+    from unittest.mock import patch
+
+    monkeypatch.setattr("sys.argv", ["yt-whisper"])
+    with patch("yt_whisper.cli.launch_tui") as mock_tui:
+        main()
+    mock_tui.assert_called_once()
 
 
-def test_validate_word_count_high(capsys):
-    wpm = validate_word_count(5000, 600)  # 500 wpm
-    captured = capsys.readouterr()
-    assert "High word count" in captured.out
-    assert wpm is not None
+def test_cli_prints_final_summary(monkeypatch, capsys, tmp_path):
+    from yt_whisper.cli import main
+    from unittest.mock import patch
 
+    def fake_run(cfg, listener, cancel_event=None):
+        return {
+            "paths": [str(tmp_path / "abc.md"), str(tmp_path / "abc.json")],
+            "title": "Demo Talk",
+            "duration_formatted": "1:23:45",
+            "word_count": 12345,
+            "wpm": 155.0,
+            "method": "whisper",
+        }
 
-def test_validate_word_count_short_video(capsys):
-    wpm = validate_word_count(10, 20)  # 20 seconds
-    captured = capsys.readouterr()
-    assert "too short" in captured.out
-    assert wpm is None
-
-
-def test_validate_word_count_boundary_30s(capsys):
-    wpm = validate_word_count(75, 30)  # exactly 30 seconds, 150 wpm
-    captured = capsys.readouterr()
-    assert "too short" not in captured.out
-    assert wpm is not None
+    monkeypatch.setattr("sys.argv", ["yt-whisper", "https://yt/abc"])
+    with patch("yt_whisper.cli.run", side_effect=fake_run):
+        main()
+    out = capsys.readouterr().out
+    assert "[OK]" in out
+    assert "Demo Talk" in out
+    assert "12345" in out
+    assert "1:23:45" in out

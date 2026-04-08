@@ -1,26 +1,18 @@
-"""CLI entrypoint and orchestration for yt-whisper."""
+"""CLI entrypoint: thin shim around runner.run with optional TUI launch."""
 
 import argparse
-import os
 import sys
-import tempfile
 
-from yt_whisper.downloader import check_subtitles, download_audio, VideoUnavailableError
-from yt_whisper.formatter import format_output, format_duration
-from yt_whisper.prompts import resolve_prompt, PROMPTS
-from yt_whisper.transcriber import transcribe, TranscriptionError
-
-MIN_VALIDATION_SECONDS = 30
+from yt_whisper.runner import RunConfig, ConsoleListener, run
 
 
 def build_parser():
-    """Build argument parser."""
     parser = argparse.ArgumentParser(
         prog="yt-whisper",
         description="Transcribe YouTube videos using faster-whisper or YouTube subtitles.",
     )
-    parser.add_argument("url", help="YouTube video URL")
-    parser.add_argument("--prompt", default="general",
+    parser.add_argument("url", nargs="?", help="YouTube video URL (omit for interactive TUI)")
+    parser.add_argument("--prompt", dest="prompt_profile", default="general",
                         help="Named prompt profile (general, grc, infosec) or custom string")
     parser.add_argument("--force-whisper", action="store_true",
                         help="Skip YouTube subtitle check, always use Whisper")
@@ -31,118 +23,80 @@ def build_parser():
     parser.add_argument("--format", dest="output_format", default="both",
                         choices=["md", "json", "both"],
                         help="Output format (default: both)")
-    parser.add_argument("--language", default="en",
-                        help="Language code (default: en)")
+    parser.add_argument("--language", default="en", help="Language code (default: en)")
+    parser.add_argument("--diarize", action="store_true",
+                        help="Enable speaker diarization (requires optional setup -- see README)")
+    parser.add_argument("--speakers", dest="num_speakers", type=int, default=None,
+                        help="Exact number of speakers (diarize only)")
+    parser.add_argument("--min-speakers", dest="min_speakers", type=int, default=None,
+                        help="Minimum number of speakers (diarize only)")
+    parser.add_argument("--max-speakers", dest="max_speakers", type=int, default=None,
+                        help="Maximum number of speakers (diarize only)")
     parser.add_argument("--verbose", action="store_true",
                         help="Show progress details and segment timing")
     return parser
 
 
-def validate_word_count(word_count, duration_seconds):
-    """Print warnings if word count seems abnormal for the video duration.
-    Returns wpm as float or None if too short to validate."""
-    if duration_seconds < MIN_VALIDATION_SECONDS:
+def launch_tui():
+    """Launch the interactive TUI."""
+    from yt_whisper.tui.app import YtWhisperApp
+    YtWhisperApp().run()
+
+
+def _print_summary(result):
+    if result is None:
+        return
+    print(f"\n[OK] {result['title']}")
+    print(f"  Duration:    {result['duration_formatted']}")
+    wpm = result.get("wpm")
+    if wpm is not None:
+        print(f"  Words:       {result['word_count']} ({wpm:.0f} words/min)")
+        if wpm < 100:
+            print(f"  Warning: Low word count ({wpm:.0f} words/min). "
+                  f"Expected ~150. Transcript may be incomplete.")
+        if wpm > 200:
+            print(f"  Warning: High word count ({wpm:.0f} words/min). "
+                  f"May indicate repeated or hallucinated text.")
+    else:
+        print(f"  Words:       {result['word_count']}")
         print("  Note: Video too short for word count validation.")
-        return None
-
-    wpm = word_count / (duration_seconds / 60)
-
-    if wpm < 100:
-        print(f"  Warning: Low word count ({wpm:.0f} words/min). "
-              f"Expected ~150. Transcript may be incomplete.")
-    if wpm > 200:
-        print(f"  Warning: High word count ({wpm:.0f} words/min). "
-              f"May indicate repeated or hallucinated text.")
-    return wpm
+    print(f"  Method:      {result['method']}")
+    for i, path in enumerate(result["paths"]):
+        prefix = "  Output:      " if i == 0 else "               "
+        print(f"{prefix}{path}")
 
 
 def main():
-    """Main CLI entrypoint."""
+    # No arguments -> launch TUI
+    if len(sys.argv) == 1:
+        launch_tui()
+        return
+
     parser = build_parser()
     args = parser.parse_args()
 
-    prompt_text = resolve_prompt(args.prompt)
+    if not args.url:
+        launch_tui()
+        return
 
-    try:
-        # Step 1: Check for existing subtitles
-        subtitle_text = None
-        metadata = None
+    cfg = RunConfig(
+        url=args.url,
+        model=args.model,
+        language=args.language,
+        prompt_profile=args.prompt_profile,
+        diarize=args.diarize,
+        num_speakers=args.num_speakers,
+        min_speakers=args.min_speakers,
+        max_speakers=args.max_speakers,
+        output_format=args.output_format,
+        output_dir=args.output_dir,
+        force_whisper=args.force_whisper,
+        verbose=args.verbose,
+    )
 
-        if args.verbose:
-            print(f"Fetching video info...")
+    listener = ConsoleListener(verbose=args.verbose)
+    result = run(cfg, listener)
+    _print_summary(result)
 
-        subtitle_text, metadata = check_subtitles(args.url, args.language)
-
-        if subtitle_text and not args.force_whisper:
-            method = "youtube_subs"
-            text_or_segments = subtitle_text
-            if args.verbose:
-                print(f"Found YouTube subtitles ({len(subtitle_text.split())} words)")
-        else:
-            if args.verbose:
-                if args.force_whisper:
-                    print("Forced Whisper transcription (--force-whisper)")
-                else:
-                    print("No usable subtitles found. Transcribing with Whisper...")
-
-            # Step 2: Download audio and transcribe
-            method = "whisper"
-            with tempfile.TemporaryDirectory() as temp_dir:
-                audio_path = download_audio(
-                    args.url, temp_dir, metadata, verbose=args.verbose
-                )
-                if args.verbose:
-                    print(f"Audio downloaded: {audio_path}")
-
-                # Step 3: Transcribe
-                text_or_segments = transcribe(
-                    audio_path, args.model, prompt_text, args.language, args.verbose
-                )
-
-        # Step 4: Format output
-        output_paths = format_output(
-            text_or_segments, metadata, args.output_format, args.output_dir,
-            model=args.model if method == "whisper" else None,
-            prompt_profile=(args.prompt if args.prompt in PROMPTS else "custom") if method == "whisper" else None,
-            method=method,
-            language=args.language,
-        )
-
-        # Step 5: Summary
-        if isinstance(text_or_segments, list):
-            full_text = " ".join(seg["text"] for seg in text_or_segments)
-        else:
-            full_text = text_or_segments
-
-        word_count = len(full_text.split())
-        duration_formatted = format_duration(metadata["duration"])
-
-        # Validate and get wpm
-        wpm = validate_word_count(word_count, metadata["duration"])
-
-        print(f"\n[OK] {metadata['title']}")
-        print(f"  Duration:    {duration_formatted}")
-        if wpm is not None:
-            print(f"  Words:       {word_count} ({wpm:.0f} words/min)")
-        else:
-            print(f"  Words:       {word_count}")
-        print(f"  Method:      {method}")
-        for i, path in enumerate(output_paths):
-            prefix = "  Output:      " if i == 0 else "               "
-            print(f"{prefix}{path}")
-
-    except VideoUnavailableError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
-    except TranscriptionError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(2)
-    except KeyboardInterrupt:
-        print("\nInterrupted.")
-        sys.exit(1)
-    except Exception as e:
-        print(f"Unexpected error: {e}", file=sys.stderr)
-        if args.verbose:
-            import traceback
-            traceback.print_exc()
+    if result is None:
         sys.exit(1)
