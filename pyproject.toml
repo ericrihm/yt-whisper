@@ -4,20 +4,22 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "yt-whisper"
-version = "0.1.0"
+version = "0.2.0"
 description = "Transcribe YouTube videos using faster-whisper or YouTube subtitles, with optional speaker diarization and a Textual TUI."
 requires-python = ">=3.10"
 dependencies = [
     "yt-dlp>=2024.01.01",
     "faster-whisper>=1.0.0",
-    "nvidia-cublas-cu12>=12.0,<13",
-    "nvidia-cudnn-cu12>=9.0,<10",
+    "av>=16.0.1,<17",  # faster-whisper uses av.open(metadata_errors=...), removed in newer PyAV.
+    "nvidia-cublas-cu12>=12.0,<13; (sys_platform == 'linux' and (platform_machine == 'x86_64' or platform_machine == 'aarch64')) or (sys_platform == 'win32' and platform_machine == 'AMD64')",
+    "nvidia-cudnn-cu12>=9.0,<10; (sys_platform == 'linux' and (platform_machine == 'x86_64' or platform_machine == 'aarch64')) or (sys_platform == 'win32' and platform_machine == 'AMD64')",
     "textual>=0.80",
     "python-dotenv>=1.0",
 ]
 
 [project.optional-dependencies]
 diarize = ["pyannote.audio>=3.1", "torchaudio"]
+metal = ["mlx-whisper>=0.4.3,<0.5; sys_platform == 'darwin' and platform_machine == 'arm64'"]
 dev = ["pytest", "pytest-asyncio>=0.23"]
 
 [project.scripts]

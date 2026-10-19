@@ -43,6 +43,21 @@ async def test_history_loads_existing_runs(tmp_path):
         assert len(history_list.children) >= 1
 
 
+
+async def test_history_rerun_preserves_explicit_cpu_backend(tmp_path):
+    data = {
+        "video_id": "cpu-run", "title": "Explicit CPU run",
+        "config": {"url": "https://yt/abc", "model": "small",
+                   "backend": "cpu", "language": "en"},
+    }
+    (tmp_path / "cpu-run.json").write_text(json.dumps(data))
+    app = YtWhisperApp(output_dir=str(tmp_path))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.query_one("#history-list").index = 0
+        app.screen.action_rerun()
+        assert app.build_runconfig().backend == "cpu"
+
 async def test_run_screen_mounts_on_start(tmp_path):
     """Submitting the form pushes the Run screen."""
     from unittest.mock import patch

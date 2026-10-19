@@ -2,7 +2,7 @@
 
 > Fast, local YouTube transcription with speaker diarization and a keyboard-first TUI.
 
-Transcribe any YouTube video on your own GPU. yt-whisper checks for existing YouTube subtitles first (fast path), falls back to [faster-whisper](https://github.com/SYSTRAN/faster-whisper) on CUDA, can label distinct speakers via [pyannote.audio](https://github.com/pyannote/pyannote-audio), and ships with an interactive Textual TUI for a full dashboard experience.
+Transcribe YouTube videos locally. yt-whisper checks for existing subtitles first, then uses faster-whisper on CPU/CUDA or optional [MLX Whisper](https://github.com/ml-explore/mlx-examples/tree/main/whisper) on Apple-silicon Metal. Speaker diarization remains opt-in, and the Textual TUI exposes the same backend choice as the CLI.
 
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![CUDA](https://img.shields.io/badge/CUDA-optional-green)
@@ -14,7 +14,7 @@ Transcribe any YouTube video on your own GPU. yt-whisper checks for existing You
 ## Features
 
 - **YouTube subtitle fast path** — uses existing subs when available, skips transcription entirely
-- **Local GPU transcription** — faster-whisper on CUDA (float16), automatic CPU fallback
+- **Native ARM / GPU transcription** — Apple-silicon CPU/int8 or optional Metal/MLX; CUDA on supported Linux/Windows architectures. Automatic CUDA fallback applies only to `auto`; explicit backend failures propagate.
 - **Speaker diarization** — opt-in pyannote pipeline, outputs `**Speaker 1:**` / `**Speaker 2:**` blocks
 - **Prompt profile auto-detection** — picks `general` / `grc` / `infosec` vocabulary from video metadata
 - **Full-screen TUI** — Home / Run / Preview screens, live streaming transcript, history browser
@@ -46,6 +46,33 @@ py -3.14 -m venv .venv
 # source .venv/bin/activate   # Linux/Mac
 pip install -e ".[dev]"
 ```
+
+### Apple silicon: native CPU and optional Metal
+
+Use a native arm64 Python interpreter, not Rosetta:
+
+```bash
+brew install ffmpeg
+uv venv --python python3.12 .venv
+uv pip install --python .venv/bin/python -e '.[metal]'
+.venv/bin/yt-whisper --help
+```
+
+Omit `[metal]` for CPU-only installation. NVIDIA dependencies are excluded on macOS; PyAV16.x is selected because newer releases removed an API used by faster-whisper. The optional Metal extra installs MLX/MLX-Whisper, including its upstream dependencies; it needs Apple-silicon macOS with an available Metal device. It does not install pyannote or start recording.
+
+`--backend auto` prefers Metal on Apple silicon when the extra and device are available, otherwise CPU/int8. Elsewhere it retains CUDA with CPU fallback. `--backend cpu`, `cuda` or `metal` requires that backend; incompatible hardware, a missing Metal extra, and runtime errors fail rather than silently changing an explicit selection. The TUI Backend field and stored re-run config preserve that choice. `config.backend` records the requested policy; runtime logs identify the selected backend.
+
+Metal maps standard Whisper model names to preconverted `mlx-community/whisper-<name>-mlx` repositories, or accepts an MLX model directory/repository. Its weights are separate from CTranslate2's CPU/CUDA cache. Use an explicit small model for initial qualification: the unchanged default `large-v3` downloads much larger weights.
+
+For an already authorized local recording, use the existing upstream file command:
+
+```bash
+.venv/bin/mlx_whisper recording.mp4 --model mlx-community/whisper-tiny.en-mlx \
+    --language en --output-format all --output-dir transcripts
+```
+
+This produces TXT, JSON, SRT, VTT and TSV without a YouTube URL or account. MLX returns completed segments as a batch, unlike faster-whisper's incremental generator; TUI segment progress and cancellation checks therefore occur after its decode returns. Metal calls are serialized within the process to protect the upstream shared model cache when TUI workers overlap. A short bootstrap sample establishes functionality, not long-recording accuracy, alignment or performance.
+
 
 ### Prerequisites
 
@@ -122,6 +149,7 @@ Keyboard-first. `Q` quit, `R` re-run selected, `P` preview, `D` delete.
 | `--force-whisper` | off | Skip subtitle check, always transcribe |
 | `--output-dir` | `./transcripts` | Where to write `.md` / `.json` |
 | `--model` | `large-v3` | Whisper model: `tiny`, `base`, `small`, `medium`, `large-v2`, `large-v3` |
+| `--backend` | `auto` | `auto`, `cpu`, `cuda`, `metal`; explicit choices never silently fall back |
 | `--format` | `both` | `md`, `json`, or `both` |
 | `--language` | `en` | Language code passed to whisper |
 | `--diarize` | off | Enable speaker diarization (requires optional setup) |
