@@ -7,7 +7,7 @@ import threading
 
 from textual import work
 from textual.app import App, ComposeResult
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen, ModalScreen
 from textual.widgets import (
     Header, Footer, Input, Select, Checkbox, Button, Label, ListView, ListItem,
@@ -114,12 +114,15 @@ class HomeScreen(Screen):
             with Vertical(id="history-pane"):
                 yield Label("History")
                 yield ListView(id="history-list")
-            with Vertical(id="form-pane"):
+            with VerticalScroll(id="form-pane"):
                 yield Label("New Transcription")
                 yield Label("URL:")
                 yield Input(placeholder="https://youtube.com/watch?v=...", id="url-input")
                 yield Label("Model:")
                 yield Select(MODEL_CHOICES, value="large-v3", id="model-select")
+                yield Label("Backend:")
+                yield Select([(name, name) for name in ("auto", "cpu", "cuda", "metal")],
+                             value="auto", allow_blank=False, id="backend-select")
                 yield Label("Language:")
                 yield Input(value="en", id="language-input")
                 yield Label("Profile:")
@@ -185,6 +188,7 @@ class HomeScreen(Screen):
         stored = load_config_for_rerun(entry)
         self.query_one("#url-input", Input).value = stored.get("url", "")
         self.query_one("#model-select", Select).value = stored.get("model") or "large-v3"
+        self.query_one("#backend-select", Select).value = stored.get("backend") or "auto"
         self.query_one("#language-input", Input).value = stored.get("language", "en")
         self.query_one("#profile-select", Select).value = stored.get("prompt_profile") or "general"
         self.query_one("#diarize-toggle", Checkbox).value = bool(stored.get("diarize"))
@@ -304,6 +308,7 @@ class YtWhisperApp(App):
     def build_runconfig(self) -> RunConfig:
         url = self.query_one("#url-input", Input).value.strip()
         model = self.query_one("#model-select", Select).value or "large-v3"
+        backend = self.query_one("#backend-select", Select).value
         language = self.query_one("#language-input", Input).value.strip() or "en"
         profile = self.query_one("#profile-select", Select).value or "general"
         diarize = self.query_one("#diarize-toggle", Checkbox).value
@@ -316,6 +321,7 @@ class YtWhisperApp(App):
             fmt = "both"
         return RunConfig(
             url=url, model=model, language=language,
+            backend=backend,
             prompt_profile=profile, diarize=diarize,
             num_speakers=num_speakers, output_format=fmt,
             output_dir=self.output_dir,

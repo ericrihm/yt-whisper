@@ -1,3 +1,3 @@
-"""yt-whisper: YouTube video transcription via faster-whisper."""
+"""yt-whisper: local YouTube transcription via CPU, CUDA or Apple Metal."""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

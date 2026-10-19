@@ -20,6 +20,8 @@ def build_parser():
                         help="Output directory (default: ./transcripts)")
     parser.add_argument("--model", default="large-v3",
                         help="Whisper model size (default: large-v3)")
+    parser.add_argument("--backend", choices=["auto", "cpu", "cuda", "metal"], default="auto",
+                        help="ASR backend (auto: Metal on Apple silicon with [metal], otherwise CPU/CUDA)")
     parser.add_argument("--format", dest="output_format", default="both",
                         choices=["md", "json", "both"],
                         help="Output format (default: both)")
@@ -82,6 +84,7 @@ def main():
     cfg = RunConfig(
         url=args.url,
         model=args.model,
+        backend=args.backend,
         language=args.language,
         prompt_profile=args.prompt_profile,
         diarize=args.diarize,

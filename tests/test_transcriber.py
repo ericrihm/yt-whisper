@@ -1,164 +1,114 @@
-import types
+import platform
+import sys
+from types import SimpleNamespace
+from unittest.mock import Mock, call
+
 import pytest
-from unittest.mock import patch, MagicMock, call
-from yt_whisper.transcriber import TranscriptionError
+
+from yt_whisper import transcriber
+from yt_whisper.transcriber import TranscriptionError, transcribe
 
 
-def _mock_segment(start, end, text):
-    seg = MagicMock()
-    seg.start = start
-    seg.end = end
-    seg.text = text
-    return seg
+@pytest.fixture
+def model_factory(monkeypatch):
+    model = SimpleNamespace(transcribe=lambda *args, **kwargs: (iter(()), None))
+    factory = Mock(return_value=model)
+    monkeypatch.setitem(sys.modules, "faster_whisper", SimpleNamespace(WhisperModel=factory))
+    monkeypatch.setattr(transcriber.importlib.util, "find_spec", lambda name: None)
+    return factory
 
 
-def test_transcription_error_is_exception():
-    err = TranscriptionError("No speech detected")
-    assert isinstance(err, Exception)
-    assert str(err) == "No speech detected"
+def test_apple_silicon_uses_cpu_without_attempting_cuda(monkeypatch, model_factory):
+    monkeypatch.setattr(platform, "system", lambda: "Darwin")
+    list(transcribe("sample.wav", "tiny.en", None, "en", False))
+    model_factory.assert_called_once_with("tiny.en", device="cpu", compute_type="int8")
 
 
-@patch("yt_whisper.transcriber.cuda_preload")
-def test_transcribe_calls_cuda_preload(mock_preload):
-    """Verify cuda_preload.ensure_dlls() is called before model creation."""
-    mock_fw = MagicMock()
-    mock_model = MagicMock()
-    mock_fw.WhisperModel.return_value = mock_model
-    mock_model.transcribe.return_value = (
-        iter([_mock_segment(0.0, 3.0, " Hello world.")]),
-        MagicMock(),
-    )
-
-    # Patch sys.modules to intercept the local 'from faster_whisper import WhisperModel'
-    with patch.dict("sys.modules", {"faster_whisper": mock_fw}):
-        from yt_whisper.transcriber import transcribe
-        result = list(transcribe("test.wav", "tiny", None, "en", False))
-
-    mock_preload.ensure_dlls.assert_called_once()
-    assert len(result) == 1
-    assert result[0]["text"] == "Hello world."
-    assert result[0]["start"] == 0.0
-    assert result[0]["end"] == 3.0
+def test_native_cpu_model_failure_is_not_retried_as_cuda_fallback(monkeypatch, model_factory):
+    monkeypatch.setattr(platform, "system", lambda: "Darwin")
+    error = RuntimeError("invalid local model")
+    model_factory.side_effect = error
+    with pytest.raises(RuntimeError) as caught:
+        list(transcribe("sample.wav", "tiny.en", None, "en", False))
+    assert caught.value is error
+    assert model_factory.call_count == 1
 
 
-@patch("yt_whisper.transcriber.cuda_preload")
-def test_transcribe_cuda_fallback_to_cpu(mock_preload, capsys):
-    """Verify CUDA failure falls back to CPU with warning."""
-    mock_fw = MagicMock()
-
-    # First WhisperModel() call raises RuntimeError (CUDA fail)
-    # Second call succeeds (CPU fallback)
-    mock_cpu_model = MagicMock()
-    mock_cpu_model.transcribe.return_value = (
-        iter([_mock_segment(0.0, 3.0, " Fallback text.")]),
-        MagicMock(),
-    )
-    mock_fw.WhisperModel.side_effect = [RuntimeError("CUDA error"), mock_cpu_model]
-
-    with patch.dict("sys.modules", {"faster_whisper": mock_fw}):
-        from yt_whisper.transcriber import transcribe
-        result = list(transcribe("test.wav", "tiny", None, "en", False))
-
-    assert len(result) == 1
-    assert result[0]["text"] == "Fallback text."
-
-    captured = capsys.readouterr()
-    assert "CUDA unavailable" in captured.out
-    assert "falling back to CPU" in captured.out
-    assert "--" in captured.out  # ASCII em dash
-
-    # Verify second call used cpu/int8
-    calls = mock_fw.WhisperModel.call_args_list
-    assert calls[1] == call("tiny", device="cpu", compute_type="int8")
+def test_linux_preserves_cuda_selection(monkeypatch, model_factory):
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    list(transcribe("sample.wav", "tiny.en", None, "en", False))
+    model_factory.assert_called_once_with("tiny.en", device="cuda", compute_type="float16")
 
 
-@patch("yt_whisper.transcriber.cuda_preload")
-def test_transcribe_is_generator(mock_preload):
-    """transcribe() must return a generator so runner can stream segments."""
-    mock_fw = MagicMock()
-    mock_model = MagicMock()
-    mock_fw.WhisperModel.return_value = mock_model
-    mock_model.transcribe.return_value = (
-        iter([_mock_segment(0.0, 1.0, " hi")]),
-        MagicMock(),
-    )
-    with patch.dict("sys.modules", {"faster_whisper": mock_fw}):
-        from yt_whisper.transcriber import transcribe
-        result = transcribe("test.wav", "tiny", None, "en", False)
-    assert isinstance(result, types.GeneratorType)
-
-
-@patch("yt_whisper.transcriber.cuda_preload")
-def test_transcribe_yields_speaker_none(mock_preload):
-    """Each yielded segment must have speaker=None (diarizer fills it later)."""
-    mock_fw = MagicMock()
-    mock_model = MagicMock()
-    mock_fw.WhisperModel.return_value = mock_model
-    mock_model.transcribe.return_value = (
-        iter([_mock_segment(0.0, 1.0, " hi")]),
-        MagicMock(),
-    )
-    with patch.dict("sys.modules", {"faster_whisper": mock_fw}):
-        from yt_whisper.transcriber import transcribe
-        segs = list(transcribe("test.wav", "tiny", None, "en", False))
-    assert segs[0]["speaker"] is None
-
-
-# --- Fix 3: log GPU vs CPU device selection ---
-
-@patch("yt_whisper.transcriber.cuda_preload")
-def test_transcribe_listener_logs_cuda(mock_preload):
-    """When CUDA succeeds, listener.on_log is called with a message containing 'cuda'."""
-    mock_fw = MagicMock()
-    mock_model = MagicMock()
-    mock_fw.WhisperModel.return_value = mock_model
-    mock_model.transcribe.return_value = (
-        iter([_mock_segment(0.0, 1.0, " hi")]),
-        MagicMock(),
-    )
-
-    listener = MagicMock()
-
-    with patch.dict("sys.modules", {"faster_whisper": mock_fw}):
-        from yt_whisper.transcriber import transcribe
-        list(transcribe("test.wav", "tiny", None, "en", False, listener=listener))
-
-    # listener.on_log should have been called with level "info" and message containing "cuda"
-    calls = listener.on_log.call_args_list
-    info_cuda_calls = [
-        c for c in calls
-        if c[0][0] == "info" and "cuda" in c[0][1].lower()
+def test_cuda_initialization_failure_falls_back_to_cpu(monkeypatch, model_factory):
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    model_factory.side_effect = [RuntimeError("CUDA unavailable"), model_factory.return_value]
+    list(transcribe("sample.wav", "tiny.en", None, "en", False))
+    assert model_factory.call_args_list == [
+        call("tiny.en", device="cuda", compute_type="float16"),
+        call("tiny.en", device="cpu", compute_type="int8"),
     ]
-    assert len(info_cuda_calls) >= 1, f"Expected on_log('info', '...cuda...'), got calls: {calls}"
 
 
-@patch("yt_whisper.transcriber.cuda_preload")
-def test_transcribe_listener_logs_cpu_fallback(mock_preload, capsys):
-    """When CUDA fails, listener.on_log is called with level 'warning' and message containing 'cpu'."""
-    mock_fw = MagicMock()
-    mock_cpu_model = MagicMock()
-    mock_cpu_model.transcribe.return_value = (
-        iter([_mock_segment(0.0, 1.0, " fallback")]),
-        MagicMock(),
+def test_failed_cpu_fallback_propagates_its_error(monkeypatch, model_factory):
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    cpu_error = ValueError("model cannot be loaded")
+    model_factory.side_effect = [RuntimeError("CUDA unavailable"), cpu_error]
+    with pytest.raises(ValueError) as caught:
+        list(transcribe("sample.wav", "tiny.en", None, "en", False))
+    assert caught.value is cpu_error
+    assert model_factory.call_count == 2
+
+
+def test_explicit_cpu_ignores_installed_metal(monkeypatch, model_factory):
+    monkeypatch.setattr(platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(platform, "machine", lambda: "arm64")
+    monkeypatch.setattr(transcriber.importlib.util, "find_spec", lambda name: object())
+    list(transcribe("sample.wav", "tiny.en", None, "en", False, backend="cpu"))
+    model_factory.assert_called_once_with("tiny.en", device="cpu", compute_type="int8")
+
+
+def test_explicit_cuda_failure_does_not_change_backend(monkeypatch, model_factory):
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    error = RuntimeError("CUDA initialization failed")
+    model_factory.side_effect = error
+    with pytest.raises(RuntimeError) as caught:
+        list(transcribe("sample.wav", "tiny.en", None, "en", False, backend="cuda"))
+    assert caught.value is error
+    assert model_factory.call_count == 1
+
+
+@pytest.mark.parametrize("backend", ["metal", "cuda"])
+def test_incompatible_hardware_refuses_before_model_load(monkeypatch, model_factory, backend):
+    monkeypatch.setattr(platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(platform, "machine", lambda: "x86_64")
+    with pytest.raises(TranscriptionError):
+        list(transcribe("sample.wav", "tiny.en", None, "en", False, backend=backend))
+    model_factory.assert_not_called()
+
+
+def test_missing_metal_extra_refuses_without_cpu_fallback(monkeypatch, model_factory):
+    monkeypatch.setattr(platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(platform, "machine", lambda: "arm64")
+    with pytest.raises(TranscriptionError):
+        list(transcribe("sample.wav", "tiny.en", None, "en", False, backend="metal"))
+    model_factory.assert_not_called()
+
+
+def test_selected_metal_failure_propagates_without_cpu_fallback(monkeypatch, model_factory):
+    monkeypatch.setattr(platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(platform, "machine", lambda: "arm64")
+    monkeypatch.setattr(transcriber.importlib.util, "find_spec", lambda name: object())
+    mx = SimpleNamespace(
+        metal=SimpleNamespace(is_available=lambda: True),
+        gpu=object(),
+        set_default_device=lambda device: None,
     )
-    mock_fw.WhisperModel.side_effect = [RuntimeError("CUDA error"), mock_cpu_model]
-
-    listener = MagicMock()
-
-    with patch.dict("sys.modules", {"faster_whisper": mock_fw}):
-        from yt_whisper.transcriber import transcribe
-        list(transcribe("test.wav", "tiny", None, "en", False, listener=listener))
-
-    # listener.on_log should have been called with level "warning" and message containing "cpu"
-    calls = listener.on_log.call_args_list
-    warning_cpu_calls = [
-        c for c in calls
-        if c[0][0] == "warning" and "cpu" in c[0][1].lower()
-    ]
-    assert len(warning_cpu_calls) >= 1, (
-        f"Expected on_log('warning', '...cpu...'), got calls: {calls}"
-    )
-
-    # Existing print-based test still works -- stdout should still have the warning
-    captured = capsys.readouterr()
-    assert "CUDA unavailable" in captured.out
+    error = RuntimeError("Metal allocation failed")
+    monkeypatch.setitem(sys.modules, "mlx", SimpleNamespace(core=mx))
+    monkeypatch.setitem(sys.modules, "mlx.core", mx)
+    monkeypatch.setitem(sys.modules, "mlx_whisper", SimpleNamespace(transcribe=Mock(side_effect=error)))
+    with pytest.raises(RuntimeError) as caught:
+        list(transcribe("sample.wav", "tiny.en", None, "en", False, backend="metal"))
+    assert caught.value is error
+    model_factory.assert_not_called()

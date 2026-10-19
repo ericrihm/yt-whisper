@@ -31,6 +31,7 @@ class RunConfig:
     output_dir: str = "./transcripts"
     force_whisper: bool = False
     verbose: bool = False
+    backend: str = "auto"
 
     def to_dict(self):
         return asdict(self)
@@ -170,6 +171,7 @@ def run(config: RunConfig, listener: Listener, cancel_event: Optional[threading.
                 for seg in transcribe(
                     audio_path, config.model, prompt_text, config.language, config.verbose,
                     listener=listener,
+                    backend=config.backend,
                 ):
                     if cancelled():
                         listener.on_log("info", "Cancelled.")
@@ -212,6 +214,7 @@ def run(config: RunConfig, listener: Listener, cancel_event: Optional[threading.
         config_block = {
             "url": config.url,
             "model": config.model if method == "whisper" else None,
+            "backend": config.backend if method == "whisper" else None,
             "language": config.language,
             "prompt_profile": effective_profile if method == "whisper" else None,
             "diarize": config.diarize,
